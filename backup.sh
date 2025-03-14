@@ -8,16 +8,32 @@ ENCRYPTED_BACKUP_FILE="$BACKUP_FILE.enc"
 MYSQL_HOST="mariadb"
 
 # Read MySQL credentials from Docker secrets
-MYSQL_USER=$(cat /run/secrets/mysql_user)
-MYSQL_PASSWORD=$(cat /run/secrets/mysql_password)
-MYSQL_DATABASE=$(cat /run/secrets/mysql_database)
+MYSQL_USER=$(cat /run/secrets/MYSQL_USER)
+MYSQL_PASSWORD=$(cat /run/secrets/MYSQL_PASSWORD)
+MYSQL_DATABASE=$(cat /run/secrets/MYSQL_DATABASE)
 
 # Ensure backup directory exists
 mkdir -p "$BACKUP_DIR"
 
+# Ensure required commands are available
+if ! command -v mariadb-dump &> /dev/null; then
+    echo "mariadb-dump could not be found. Please ensure it is installed."
+    exit 1
+fi
+
+if ! command -v sops &> /dev/null; then
+    echo "sops could not be found. Please ensure it is installed."
+    exit 1
+fi
+
+if ! command -v aws &> /dev/null; then
+    echo "AWS CLI could not be found. Please ensure it is installed."
+    exit 1
+fi
+
 # Perform backup
 echo "Starting database backup..."
-mariadb -h "$MYSQL_HOST" --user "$MYSQL_USER" --password "$MYSQL_PASSWORD" "$MYSQL_DATABASE" | gzip > "$BACKUP_FILE"
+mariadb-dump -h "$MYSQL_HOST" --user "$MYSQL_USER" --password="$MYSQL_PASSWORD" "$MYSQL_DATABASE" | gzip > "$BACKUP_FILE"
 
 if [ $? -eq 0 ]; then
     echo "Backup successful: $BACKUP_FILE"
@@ -26,13 +42,13 @@ else
     exit 1
 fi
 
-# Encrypt the backup using sops
-echo "Encrypting backup with sops..."
+# Encrypt the backup file locally before uploading
+echo "Encrypting backup file with sops..."
 sops --encrypt --age "$(cat /run/secrets/SOPS_ENCRYPTION_KEY)" "$BACKUP_FILE" > "$ENCRYPTED_BACKUP_FILE"
 
 if [ $? -eq 0 ]; then
     echo "Encryption successful: $ENCRYPTED_BACKUP_FILE"
-    rm "$BACKUP_FILE"
+    rm "$BACKUP_FILE"  # Remove unencrypted backup after encryption
 else
     echo "Encryption failed!"
     exit 1
@@ -57,4 +73,3 @@ if [ "$USE_S3" = "true" ]; then
 fi
 
 echo "Backup process completed."
-
