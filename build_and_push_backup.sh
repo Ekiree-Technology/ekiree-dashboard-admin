@@ -1,9 +1,8 @@
 #!/bin/sh
 
 # Set variables
-IMAGE_NAME="ekiree-backup"
-GITHUB_USER="ekiree-technology"  # Change this to your GitHub username
-REPO="your-repo"  # Change to your GitHub repo
+IMAGE_NAME="ekiree-dashboard-admin"
+GITHUB_USER="ekiree-technology"
 TAG="latest"
 GHCR_IMAGE="ghcr.io/$GITHUB_USER/$IMAGE_NAME:$TAG"
 

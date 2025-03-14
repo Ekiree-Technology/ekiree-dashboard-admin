@@ -4,6 +4,7 @@
 BACKUP_DIR="/backups"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 BACKUP_FILE="$BACKUP_DIR/mariadb_backup_$TIMESTAMP.sql.gz"
+ENCRYPTED_BACKUP_FILE="$BACKUP_FILE.enc"
 MYSQL_HOST="mariadb"
 
 # Read MySQL credentials from Docker secrets
@@ -16,7 +17,7 @@ mkdir -p "$BACKUP_DIR"
 
 # Perform backup
 echo "Starting database backup..."
-mysqldump -h "$MYSQL_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" | gzip > "$BACKUP_FILE"
+mariadb -h "$MYSQL_HOST" --user "$MYSQL_USER" --password "$MYSQL_PASSWORD" "$MYSQL_DATABASE" | gzip > "$BACKUP_FILE"
 
 if [ $? -eq 0 ]; then
     echo "Backup successful: $BACKUP_FILE"
@@ -25,16 +26,28 @@ else
     exit 1
 fi
 
+# Encrypt the backup using sops
+echo "Encrypting backup with sops..."
+sops --encrypt --age "$(cat /run/secrets/SOPS_ENCRYPTION_KEY)" "$BACKUP_FILE" > "$ENCRYPTED_BACKUP_FILE"
+
+if [ $? -eq 0 ]; then
+    echo "Encryption successful: $ENCRYPTED_BACKUP_FILE"
+    rm "$BACKUP_FILE"
+else
+    echo "Encryption failed!"
+    exit 1
+fi
+
 # Optional: Upload to S3
 if [ "$USE_S3" = "true" ]; then
-    S3_BUCKET_NAME=$(cat /run/secrets/S3_BUCKET_NAME)
-    S3_ACCESS_KEY=$(cat /run/secrets/S3_ACCESS_KEY)
-    S3_SECRET_KEY=$(cat /run/secrets/S3_SECRET_KEY)
-    S3_BUCKET_ENDPOINT=$(cat /run/secrets/S3_BUCKET_ENDPOINT)
+    BACKUP_BUCKET_NAME=$(cat /run/secrets/BACKUP_BUCKET_NAME)
+    BACKUP_ACCESS_KEY=$(cat /run/secrets/BACKUP_ACCESS_KEY)
+    BACKUP_SECRET_KEY=$(cat /run/secrets/BACKUP_SECRET_KEY)
+    BACKUP_BUCKET_ENDPOINT=$(cat /run/secrets/BACKUP_BUCKET_ENDPOINT)
 
-    echo "Uploading backup to S3 storage..."
-    AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
-    aws s3 cp "$BACKUP_FILE" "s3://$S3_BUCKET_NAME/mariadb_backups/" --endpoint-url "$S3_BUCKET_ENDPOINT"
+    echo "Uploading encrypted backup to S3 storage..."
+    AWS_ACCESS_KEY_ID="$BACKUP_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$BACKUP_SECRET_KEY" \
+    aws s3 cp "$ENCRYPTED_BACKUP_FILE" "s3://$BACKUP_BUCKET_NAME/mariadb_backups/" --endpoint-url "$BACKUP_BUCKET_ENDPOINT"
 
     if [ $? -eq 0 ]; then
         echo "Upload successful."
